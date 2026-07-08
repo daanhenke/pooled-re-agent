@@ -155,6 +155,9 @@ re-agent --config re-agent.orchestrator.yaml serve
 # 2. Agent (each volunteer — no Ghidra, no source tree)
 re-agent init --role agent --config re-agent.agent.yaml
 re-agent --config re-agent.agent.yaml agent --concurrency 2
+
+# Optional: dump the reverser/checker chat logs locally (one subdir per function)
+re-agent --config re-agent.agent.yaml agent --log-dir agent-logs
 ```
 
 Jobs are leased so two agents never get the same function, and an abandoned job is

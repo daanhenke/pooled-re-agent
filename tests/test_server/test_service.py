@@ -166,3 +166,28 @@ async def test_enqueue_takes_priority_over_greedy(tmp_path: Path) -> None:
         r = await bus.request(proto.job_request_subject(project), {"agent_id": aid}, 30)
         handed.append(wire.decode_target(r["target"]).address if r["target"] else None)
     assert handed == ["0x111111", "0x222222", "0x900000", None]
+
+
+@pytest.mark.asyncio
+async def test_auto_pick_disabled_serves_queue_only(tmp_path: Path) -> None:
+    config = _make_config(tmp_path)
+    config.orchestrator.auto_pick = False
+    session = Session(config.output.session_file)
+    backend = StubBackend(remaining_functions=[
+        FunctionEntry(address="0x900000", name="Greedy", class_name="CStub", caller_count=1),
+    ])
+    service = OrchestratorService(config, backend, session, indexer=None, source_ctx=None)
+    bus = FakeTransport()
+    await service.subscribe(bus)
+    project = "testproj"
+
+    # Empty queue + auto_pick off -> no work, even though the backend has remaining.
+    r0 = await bus.request(proto.job_request_subject(project), {"agent_id": "a1"}, 30)
+    assert r0["target"] is None
+
+    # After enqueuing, that function (and only it) is served.
+    await bus.request(proto.enqueue_subject(project), {"addresses": ["0x111111"], "filter": None}, 30)
+    r1 = await bus.request(proto.job_request_subject(project), {"agent_id": "a1"}, 30)
+    assert wire.decode_target(r1["target"]).address == "0x111111"
+    r2 = await bus.request(proto.job_request_subject(project), {"agent_id": "a2"}, 30)
+    assert r2["target"] is None  # leased; no greedy fallback

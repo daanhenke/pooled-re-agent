@@ -104,3 +104,36 @@ def test_fix_loop_runs_against_remote_backend() -> None:
     assert result.success
     assert result.checker_verdict is not None
     assert result.checker_verdict.verdict == Verdict.PASS
+
+
+def test_agent_dumps_chat_logs(tmp_path: Any) -> None:
+    """The pooled worker writes per-round reverser/checker chat logs when enabled."""
+    import json
+
+    from re_agent.worker.app import _run_one_job
+
+    backend = StubBackend()
+
+    def request(subject: str, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            return {"ok": True, "result": proto.dispatch(backend, None, payload["op"], payload["args"])}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
+
+    target = FunctionTarget(address="0x6F86A0", class_name="CTrain", function_name="ProcessControl")
+    llm = MockLLM([
+        "```cpp\nvoid CTrain::ProcessControl() { }\n```\nREVERSED_FUNCTION: x",
+        "VERDICT: PASS\nSUMMARY: ok\nISSUES:\n- none\nFIX_INSTRUCTIONS:\n- none",
+    ])
+
+    result = _run_one_job(target, {"max_rounds": 2}, llm, "p", request, tmp_path)
+    assert result.success
+
+    logdir = tmp_path / "0x6F86A0_ProcessControl"
+    assert logdir.is_dir()
+    files = list(logdir.glob("*.json"))
+    assert any("reverser" in f.name for f in files)
+    assert any("checker" in f.name for f in files)
+    rev = json.loads(next(f for f in files if "reverser" in f.name).read_text(encoding="utf-8"))
+    assert "prompt" in rev and "response" in rev and rev["response"]
+

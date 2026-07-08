@@ -99,6 +99,7 @@ orchestrator:
   max_review_rounds: 4
   objective_verifier_enabled: true
   job_lease_s: 900
+  # auto_pick: false        # queue-only mode: serve ONLY enqueued functions
 
 output:
   report_dir: "reports/re-agent"
@@ -129,6 +130,7 @@ agent:
   # agent_id: null          # defaults to a host-derived id
   concurrency: 1            # jobs to run in parallel
   idle_poll_s: 5.0
+  log_dir: "agent-logs"     # dump per-round reverser/checker chat logs here
 
 transport:
   servers:

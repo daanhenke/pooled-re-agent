@@ -56,6 +56,8 @@ def build_parser() -> argparse.ArgumentParser:
     agent_p.add_argument("--project", default=None, help="Override transport.project (subject namespace)")
     agent_p.add_argument("--agent-id", dest="agent_id", default=None, help="Override this agent's id")
     agent_p.add_argument("--concurrency", type=int, default=None, help="Jobs to run in parallel")
+    agent_p.add_argument("--log-dir", dest="log_dir", default=None,
+                         help="Write per-round reverser/checker chat logs to this directory")
 
     # enqueue (push work to a running orchestrator)
     enq_p = sub.add_parser("enqueue", help="Enqueue functions for the pool to reverse (priority over auto-pick)")

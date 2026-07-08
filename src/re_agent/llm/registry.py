@@ -53,6 +53,7 @@ def create_provider(config: LLMConfig) -> LLMProvider:
         return ClaudeCodeProvider(
             model=config.model or "claude-sonnet-4-5",
             timeout_s=config.timeout_s,
+            stream=config.stream,
         )
 
     raise ValueError(

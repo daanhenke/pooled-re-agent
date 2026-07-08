@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from pathlib import Path
 from typing import Any
 
 from re_agent.agents.loop import run_fix_loop
@@ -36,17 +37,28 @@ def _default_agent_id() -> str:
     return f"{host}-{uuid.uuid4().hex[:6]}"
 
 
+def _job_log_dir(log_root: Path | None, target: FunctionTarget) -> Path | None:
+    """A per-function subdirectory of the agent's log root (or None if disabled)."""
+    if log_root is None:
+        return None
+    safe = f"{target.address}_{target.function_name}".replace("::", "_").replace("/", "_")
+    return log_root / safe
+
+
 def _run_one_job(
     target: FunctionTarget,
     job_cfg: dict[str, Any],
     llm: LLMProvider,
     project: str,
     request: BlockingRequest,
+    log_root: Path | None = None,
 ) -> ReversalResult:
     """Synchronous: run the fix loop for one function against the remote backend.
 
     Executes in a worker thread.  All Ghidra/source access goes through
     ``request`` (proxied to the orchestrator); no local Ghidra or source tree.
+    When ``log_root`` is set, per-round reverser/checker chat logs are written to
+    a per-function subdirectory.
     """
     rpc = RpcClient(project, request)
     backend = RemoteBackend(rpc)
@@ -62,6 +74,7 @@ def _run_one_job(
         objective_verifier_enabled=bool(job_cfg.get("objective_verifier_enabled", True)),
         objective_call_count_tolerance=int(job_cfg.get("objective_call_count_tolerance", 3)),
         objective_control_flow_tolerance=int(job_cfg.get("objective_control_flow_tolerance", 2)),
+        log_dir=_job_log_dir(log_root, target),
     )
 
 
@@ -80,8 +93,12 @@ async def run_agent(config: ReAgentConfig) -> None:
         )
         return fut.result()
 
+    log_root = Path(config.agent.log_dir) if config.agent.log_dir else None
+
     logger.info("Agent %s joined project %r via %s", agent_id, project, config.transport.servers)
     print(f"Agent {agent_id} online — project '{project}', concurrency {config.agent.concurrency}")
+    if log_root is not None:
+        print(f"Writing per-round chat logs to {log_root} (one subdirectory per function)")
 
     async def slot(slot_idx: int) -> None:
         llm = create_provider(config.llm)  # one provider per slot (own creds)
@@ -109,7 +126,7 @@ async def run_agent(config: ReAgentConfig) -> None:
 
             try:
                 result = await loop.run_in_executor(
-                    None, _run_one_job, target, job_cfg, llm, project, blocking_request
+                    None, _run_one_job, target, job_cfg, llm, project, blocking_request, log_root
                 )
             except Exception as exc:
                 logger.exception("[slot %d] job failed for %s", slot_idx, label)

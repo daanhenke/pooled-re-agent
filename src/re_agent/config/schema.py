@@ -40,6 +40,8 @@ class LLMConfig:
     max_tokens: int = 4096
     temperature: float = 0.0
     timeout_s: int = 1800
+    # Tee CLI-provider output (claude-code) to the terminal as it streams in.
+    stream: bool = False
 
 
 @dataclass
@@ -75,6 +77,10 @@ class OrchestratorConfig:
     # When serving pooled agents, how long a handed-out function stays leased to
     # an agent before it is considered abandoned and re-offered to another agent.
     job_lease_s: int = 900
+    # When False, `serve` only hands out explicitly enqueued functions (no greedy
+    # unimplemented/remaining fallback). Useful when the backend's auto-list is
+    # capped or you want full control over what gets reversed.
+    auto_pick: bool = True
     # Optional scope for `serve`: restrict handed-out work to these classes.
     # Empty means the whole project (backend.remaining(None)).
     classes: list[str] = field(default_factory=list)
@@ -114,6 +120,9 @@ class AgentConfig:
     agent_id: str | None = None          # defaults to a host-derived id at runtime
     concurrency: int = 1                 # jobs this agent runs in parallel
     idle_poll_s: float = 5.0             # wait before re-asking when no work
+    # If set, write per-round reverser/checker prompt+response chat logs here
+    # (one subdirectory per function). Off by default.
+    log_dir: str | None = None
 
 
 @dataclass

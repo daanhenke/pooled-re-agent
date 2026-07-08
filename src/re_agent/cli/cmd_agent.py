@@ -21,6 +21,8 @@ def cmd_agent(args: argparse.Namespace) -> int:
         config.agent.agent_id = args.agent_id
     if getattr(args, "concurrency", None):
         config.agent.concurrency = args.concurrency
+    if getattr(args, "log_dir", None):
+        config.agent.log_dir = args.log_dir
 
     from re_agent.worker.app import run
 

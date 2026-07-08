@@ -82,3 +82,40 @@ def test_subcmd_exists_unrecognized_args_not_false_negative() -> None:
             (1, "", "error: missing operand"),
         ]
         assert backend._subcmd_exists("asm") is True
+
+
+# -- Function-list parsing ----------------------------------------------------
+
+
+def test_parse_function_list_unimplemented_format() -> None:
+    """The real `ghidra-bridge unimplemented` format: header lines skipped,
+    "[N callers]" read, function name taken correctly."""
+    raw = (
+        "Unimplemented functions: 37269\n"
+        "(Sorted by number of callers - most important first)\n"
+        "\n"
+        "  0x140263e80  [7723 callers]  FUN_140263e80\n"
+        "  0x140265e60  [5981 callers]  FUN_140265e60\n"
+        "  0x1409d4dc4  [3220 callers]  atexit\n"
+    )
+    entries = GhidraBridgeBackend._parse_function_list(raw)
+    assert len(entries) == 3  # the two header lines are NOT parsed as functions
+    assert entries[0].address == "0x140263e80"
+    assert entries[0].name == "FUN_140263e80"
+    assert entries[0].caller_count == 7723
+    assert entries[2].name == "atexit"
+
+
+def test_parse_function_list_variants() -> None:
+    """No-0x addresses, Class::Func names, and trailing "(N callers)" form."""
+    raw = (
+        "Total functions: 2\n"
+        "  140001000  FUN_140001000\n"
+        "  0x5E3E90  CTrain::ProcessControl  (5 callers)\n"
+    )
+    entries = GhidraBridgeBackend._parse_function_list(raw)
+    assert len(entries) == 2
+    assert entries[0].address == "140001000" and entries[0].name == "FUN_140001000"
+    assert entries[1].class_name == "CTrain"
+    assert entries[1].name == "ProcessControl"
+    assert entries[1].caller_count == 5

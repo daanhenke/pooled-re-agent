@@ -88,7 +88,9 @@ class OrchestratorService:
         for qt in self.session.queued_targets():
             if not self.session.is_attempted(qt.address) and normalize_address(qt.address) not in leased:
                 return qt
-        # 2. Fallback: class-scoped, else whole-project greedy picker.
+        # 2. Fallback picker — disabled when auto_pick is off (queue-only mode).
+        if not self.config.orchestrator.auto_pick:
+            return None
         classes = self.config.orchestrator.classes
         if classes:
             for cls in classes:

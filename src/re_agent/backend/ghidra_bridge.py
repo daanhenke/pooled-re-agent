@@ -16,6 +16,12 @@ from re_agent.core.models import (
 )
 from re_agent.utils.process import run_cmd, run_cmd_split
 
+# A bare hex address token (with or without the 0x prefix) — real function-list
+# rows start with one; header/summary/banner lines do not.
+_LIST_ADDR_RE = re.compile(r"^(?:0x)?[0-9A-Fa-f]+$")
+# A caller-count annotation in either "[N callers]" or "(N callers)" form.
+_LIST_CALLERS_RE = re.compile(r"[\[(](\d+)\s+callers?[\])]")
+
 
 class GhidraBridgeBackend:
     """Backend that shells out to a Ghidra CLI tool.
@@ -288,36 +294,42 @@ class GhidraBridgeBackend:
 
     @staticmethod
     def _parse_function_list(raw: str) -> list[FunctionEntry]:
-        """Parse function list output into FunctionEntry objects.
+        """Parse function-list output into FunctionEntry objects.
 
-        Handles several common formats:
-        - ``0xADDRESS  ClassName::FunctionName``
-        - ``0xADDRESS  FunctionName  (N callers)``
-        - Free-form lines with at least an address token.
+        Handles the ghidra-bridge formats, e.g.::
+
+            0x140263e80  [7723 callers]  FUN_140263e80
+            140001000    FUN_140001000
+            0x5E3E90     CTrain::ProcessControl  (5 callers)
+
+        Header/summary/banner lines ("Unimplemented functions: N",
+        "(Sorted by ...)") are skipped because their first token is not a hex
+        address — this is what stops bogus targets like ``::functions:`` from
+        being handed to agents.
         """
         results: list[FunctionEntry] = []
-        for line in raw.splitlines():
-            line = line.strip()
-            if not line or line.startswith(("#", "=", "-", "//")):
+        for raw_line in raw.splitlines():
+            line = raw_line.strip()
+            if not line:
                 continue
 
             parts = line.split()
-            if not parts:
-                continue
-
             addr = parts[0]
-            name = parts[1] if len(parts) > 1 else ""
-            class_name = ""
+            if not _LIST_ADDR_RE.match(addr):
+                continue  # header / banner / summary line
+
             caller_count = 0
-
-            # Split "Class::Func" into class_name and name.
-            if "::" in name:
-                class_name, _, name = name.rpartition("::")
-
-            # Look for "(N callers)" at the end.
-            cm = re.search(r"\((\d+)\s+callers?\)", line)
+            cm = _LIST_CALLERS_RE.search(line)
             if cm:
                 caller_count = int(cm.group(1))
+
+            # The name is the last token once any "[N callers]"/"(N callers)"
+            # annotation is stripped (it can appear before or after the name).
+            remainder = _LIST_CALLERS_RE.sub("", line).split()
+            name = remainder[-1] if len(remainder) > 1 else ""
+            class_name = ""
+            if "::" in name:
+                class_name, _, name = name.rpartition("::")
 
             results.append(
                 FunctionEntry(
