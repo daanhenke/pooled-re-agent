@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 from re_agent.config.schema import (
+    AgentConfig,
     BackendConfig,
     LLMConfig,
     OrchestratorConfig,
@@ -15,6 +16,7 @@ from re_agent.config.schema import (
     ParityConfig,
     ProjectProfile,
     ReAgentConfig,
+    TransportConfig,
 )
 
 
@@ -70,6 +72,29 @@ def _apply_env_overrides(raw: dict[str, Any]) -> dict[str, Any]:
                 d[part] = {}
             d = d[part]
         d[key_path[-1]] = cast_type(value)
+
+    # Transport (NATS) scalar overrides.
+    transport_env: list[tuple[str, str]] = [
+        ("RE_AGENT_NATS_PROJECT", "project"),
+        ("RE_AGENT_NATS_CREDS", "creds_file"),
+        ("RE_AGENT_NATS_TOKEN", "token"),
+        ("RE_AGENT_NATS_USER", "user"),
+        ("RE_AGENT_NATS_PASSWORD", "password"),
+    ]
+    for env_var, key in transport_env:
+        value = os.environ.get(env_var)
+        if value is None:
+            continue
+        raw.setdefault("transport", {})
+        if isinstance(raw["transport"], dict):
+            raw["transport"][key] = value
+
+    # RE_AGENT_NATS_SERVERS is a comma-separated list.
+    servers_env = os.environ.get("RE_AGENT_NATS_SERVERS")
+    if servers_env is not None:
+        raw.setdefault("transport", {})
+        if isinstance(raw["transport"], dict):
+            raw["transport"]["servers"] = [s.strip() for s in servers_env.split(",") if s.strip()]
 
     return raw
 
@@ -157,6 +182,14 @@ def _build_output_config(data: dict[str, Any]) -> OutputConfig:
     return _build_with_coercion(OutputConfig, data)
 
 
+def _build_transport_config(data: dict[str, Any]) -> TransportConfig:
+    return _build_with_coercion(TransportConfig, data)
+
+
+def _build_agent_config(data: dict[str, Any]) -> AgentConfig:
+    return _build_with_coercion(AgentConfig, data)
+
+
 def _build_config(raw: dict[str, Any]) -> ReAgentConfig:
     """Build a ReAgentConfig from a raw dict."""
     return ReAgentConfig(
@@ -166,6 +199,8 @@ def _build_config(raw: dict[str, Any]) -> ReAgentConfig:
         parity=_build_parity_config(raw.get("parity", {})),
         orchestrator=_build_orchestrator_config(raw.get("orchestrator", {})),
         output=_build_output_config(raw.get("output", {})),
+        transport=_build_transport_config(raw.get("transport", {})),
+        agent=_build_agent_config(raw.get("agent", {})),
     )
 
 

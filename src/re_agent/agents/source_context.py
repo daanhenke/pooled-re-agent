@@ -3,11 +3,27 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Protocol, runtime_checkable
 
 from re_agent.config.schema import ProjectProfile
 from re_agent.core.models import FunctionTarget
 from re_agent.core.session import Session
 from re_agent.parity.source_indexer import SourceIndexer
+
+
+@runtime_checkable
+class SourceContextProvider(Protocol):
+    """Supplies retrieval context for a target function.
+
+    This is the seam that lets the reverser run either locally (against the
+    source tree via :class:`SourceContextBuilder`) or on a pooled agent (against
+    the orchestrator via ``RemoteSourceContextProvider``, which RPCs the same
+    ``build`` call back over NATS).
+    """
+
+    def build(self, target: FunctionTarget) -> str:
+        """Return retrieval context text (may be empty)."""
+        ...
 
 
 class SourceContextBuilder:

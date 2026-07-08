@@ -2,20 +2,27 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from pathlib import Path
 from typing import Any
 
-from re_agent.core.models import ReversalResult
+from re_agent.core.models import FunctionTarget, ReversalResult
 from re_agent.utils.address import normalize_address
 
 
 class Session:
-    """Tracks reversal progress in a JSON file."""
+    """Tracks reversal progress in a JSON file.
+
+    When serving pooled agents, ``in_progress`` also holds short-lived *leases*
+    on functions that have been handed out but not yet completed, so two agents
+    are never given the same function.  An expired lease (agent crashed / went
+    away) is simply ignored, which re-offers the function.
+    """
 
     def __init__(self, path: str | Path = "re-agent-progress.json") -> None:
         self.path = Path(path)
-        self._data: dict[str, Any] = {"functions": {}, "runs": []}
+        self._data: dict[str, Any] = {"functions": {}, "runs": [], "in_progress": {}}
         if self.path.exists():
             self.load()
 
@@ -23,13 +30,19 @@ class Session:
         try:
             self._data = json.loads(self.path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
-            self._data = {"functions": {}, "runs": []}
+            self._data = {"functions": {}, "runs": [], "in_progress": {}}
+        # Tolerate older files that predate leasing.
+        self._data.setdefault("functions", {})
+        self._data.setdefault("runs", [])
+        self._data.setdefault("in_progress", {})
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".tmp")
         tmp.write_text(json.dumps(self._data, indent=2), encoding="utf-8")
-        tmp.rename(self.path)
+        # os.replace is an atomic overwrite on all platforms; Path.rename raises
+        # FileExistsError on Windows when the destination already exists.
+        os.replace(tmp, self.path)
 
     def record_result(self, result: ReversalResult) -> None:
         addr = normalize_address(result.target.address)
@@ -45,7 +58,53 @@ class Session:
         }
         self._data["functions"][addr] = entry
         self._data["runs"].append(entry)
+        self._data["in_progress"].pop(addr, None)  # completing releases any lease
         self.save()
+
+    # -- leasing (pooled-agent job assignment) --------------------------------
+
+    def mark_in_progress(self, target: FunctionTarget, agent_id: str, lease_s: int) -> None:
+        """Lease a function to an agent for ``lease_s`` seconds."""
+        addr = normalize_address(target.address)
+        self._data["in_progress"][addr] = {
+            "address": target.address,
+            "class_name": target.class_name,
+            "function_name": target.function_name,
+            "caller_count": target.caller_count,
+            "agent_id": agent_id,
+            "expiry": time.time() + lease_s,
+        }
+        self.save()
+
+    def release(self, address: str) -> None:
+        """Drop a lease (e.g. the agent failed the job) so it can be re-offered."""
+        addr = normalize_address(address)
+        if self._data["in_progress"].pop(addr, None) is not None:
+            self.save()
+
+    def active_in_progress(self) -> set[str]:
+        """Return normalized addresses with a *live* (unexpired) lease.
+
+        Expired leases are pruned as a side effect so abandoned jobs return to
+        the pool automatically.
+        """
+        now = time.time()
+        live: set[str] = set()
+        expired: list[str] = []
+        for addr, info in self._data["in_progress"].items():
+            if info.get("expiry", 0) > now:
+                live.add(addr)
+            else:
+                expired.append(addr)
+        if expired:
+            for addr in expired:
+                self._data["in_progress"].pop(addr, None)
+            self.save()
+        return live
+
+    def is_in_progress(self, address: str) -> bool:
+        """Return True if this address currently holds a live lease."""
+        return normalize_address(address) in self.active_in_progress()
 
     def is_completed(self, address: str) -> bool:
         addr = normalize_address(address)

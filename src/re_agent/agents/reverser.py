@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from re_agent.agents.source_context import SourceContextBuilder
+from re_agent.agents.source_context import SourceContextBuilder, SourceContextProvider
 from re_agent.backend.protocol import REBackend
 from re_agent.config.schema import ProjectProfile
 from re_agent.core.models import FunctionTarget
@@ -30,11 +30,17 @@ class ReverserAgent:
         indexer: SourceIndexer | None = None,
         session: Session | None = None,
         report_dir: Path | None = None,
+        source_context: SourceContextProvider | None = None,
     ) -> None:
         self.llm = llm
         self.backend = backend
-        self._source_context_builder: SourceContextBuilder | None = None
-        if source_root is not None and project_profile is not None and source_root.exists():
+        # A pre-built provider wins (e.g. a pooled agent's remote provider that
+        # RPCs source-context back to the orchestrator).  Otherwise build a local
+        # one from the source tree, preserving the original single-machine flow.
+        self._source_context_builder: SourceContextProvider | None = source_context
+        if self._source_context_builder is None and (
+            source_root is not None and project_profile is not None and source_root.exists()
+        ):
             self._source_context_builder = SourceContextBuilder(
                 source_root=source_root,
                 profile=project_profile,

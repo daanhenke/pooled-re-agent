@@ -6,7 +6,11 @@ from pathlib import Path
 
 import yaml  # type: ignore[import-untyped]
 
-from re_agent.config.defaults import DEFAULT_CONFIG_YAML, EXAMPLE_PROFILE_TEMPLATES
+from re_agent.config.defaults import (
+    DEFAULT_CONFIG_YAML,
+    EXAMPLE_PROFILE_TEMPLATES,
+    ROLE_CONFIG_TEMPLATES,
+)
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -16,6 +20,23 @@ def cmd_init(args: argparse.Namespace) -> int:
         print(f"Config already exists: {config_path}")
         print("Delete it first if you want to regenerate.")
         return 1
+
+    # Role-specific templates (orchestrator / agent) short-circuit the
+    # profile-overlay path below — they are purpose-built starting points.
+    role = getattr(args, "role", None)
+    if role:
+        if role not in ROLE_CONFIG_TEMPLATES:
+            available = ", ".join(ROLE_CONFIG_TEMPLATES)
+            print(f"Unknown role: {role}")
+            print(f"Available roles: {available}")
+            return 1
+        config_path.write_text(ROLE_CONFIG_TEMPLATES[role], encoding="utf-8")
+        print(f"Created {config_path} for role '{role}'")
+        if role == "agent":
+            print("Set your LLM key (RE_AGENT_LLM_API_KEY) and point transport at the NATS server.")
+        else:
+            print("Point backend.cli_path at Ghidra and transport at the NATS server, then: re-agent serve")
+        return 0
 
     content = DEFAULT_CONFIG_YAML
 

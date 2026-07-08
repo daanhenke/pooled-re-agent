@@ -16,6 +16,81 @@ from re_agent.parity.source_indexer import SourceIndexer
 logger = logging.getLogger(__name__)
 
 
+def finalize_result(
+    result: ReversalResult,
+    config: ReAgentConfig,
+    backend: REBackend,
+    session: Session | None = None,
+    indexer: SourceIndexer | None = None,
+    output_dir: Path | None = None,
+) -> ReversalResult:
+    """Persist a reversal result: write code, run parity, record the session.
+
+    Shared by the local :func:`reverse_single` path and the orchestrator server
+    (which runs this when a pooled agent submits its result).  The agent loop
+    itself does none of this — it only produces the ``ReversalResult``.
+
+    Args:
+        output_dir: If provided, write generated code here (named
+            ``<address>_<class>_<func>.cpp``); otherwise ``report_dir/code``.
+        indexer: Pre-built source indexer to avoid re-scanning the source tree.
+    """
+    target = result.target
+
+    # Write generated code to a file so users don't have to dig through logs.
+    if result.code:
+        code_dir = output_dir or (Path(config.output.report_dir) / "code")
+        try:
+            code_dir.mkdir(parents=True, exist_ok=True)
+            safe_name = f"{target.address}_{target.class_name}_{target.function_name}.cpp"
+            safe_name = safe_name.replace("::", "_").replace("/", "_")
+            code_path = code_dir / safe_name
+            code_path.write_text(result.code, encoding="utf-8")
+            logger.info("Code written to %s", code_path)
+        except OSError as exc:
+            logger.warning("Failed to write code file: %s", exc)
+
+    # Run parity check if enabled and code was produced.
+    if config.parity.enabled and result.code:
+        try:
+            if indexer is None:
+                source_root = Path(config.project_profile.source_root)
+                indexer = SourceIndexer(source_root, config.project_profile)
+            source = indexer.find(target.class_name, target.function_name)
+
+            # Fetch Ghidra data from the backend for signal checks.
+            ghidra_data = None
+            if backend.capabilities.has_decompile:
+                try:
+                    ghidra_data = fetch_ghidra_data(target.address, backend)
+                except Exception:
+                    logger.debug("Ghidra data fetch failed for %s, running source-only", target.address, exc_info=True)
+
+            status, findings = score_single(
+                entry=_target_to_hook(target),
+                source=source,
+                ghidra=ghidra_data,
+                config=config.parity,
+            )
+            result = ReversalResult(
+                target=result.target,
+                code=result.code,
+                checker_verdict=result.checker_verdict,
+                objective_verdict=result.objective_verdict,
+                parity_status=status,
+                parity_findings=findings,
+                rounds_used=result.rounds_used,
+                success=result.success,
+            )
+        except (FileNotFoundError, ValueError) as exc:
+            logger.warning("Parity check failed for %s: %s", target.address, exc)
+
+    if session:
+        session.record_result(result)
+
+    return result
+
+
 def reverse_single(
     target: FunctionTarget,
     config: ReAgentConfig,
@@ -53,58 +128,14 @@ def reverse_single(
         objective_control_flow_tolerance=config.orchestrator.objective_control_flow_tolerance,
     )
 
-    # Write generated code to a file so users don't have to dig through logs
-    if result.code:
-        code_dir = output_dir or (Path(config.output.report_dir) / "code")
-        try:
-            code_dir.mkdir(parents=True, exist_ok=True)
-            safe_name = f"{target.address}_{target.class_name}_{target.function_name}.cpp"
-            safe_name = safe_name.replace("::", "_").replace("/", "_")
-            code_path = code_dir / safe_name
-            code_path.write_text(result.code, encoding="utf-8")
-            logger.info("Code written to %s", code_path)
-        except OSError as exc:
-            logger.warning("Failed to write code file: %s", exc)
-
-    # Run parity check if enabled and code was produced
-    if config.parity.enabled and result.code:
-        try:
-            if indexer is None:
-                source_root = Path(config.project_profile.source_root)
-                indexer = SourceIndexer(source_root, config.project_profile)
-            source = indexer.find(target.class_name, target.function_name)
-
-            # Fetch Ghidra data from the backend for signal checks
-            ghidra_data = None
-            if backend.capabilities.has_decompile:
-                try:
-                    ghidra_data = fetch_ghidra_data(target.address, backend)
-                except Exception:
-                    logger.debug("Ghidra data fetch failed for %s, running source-only", target.address, exc_info=True)
-
-            status, findings = score_single(
-                entry=_target_to_hook(target),
-                source=source,
-                ghidra=ghidra_data,
-                config=config.parity,
-            )
-            result = ReversalResult(
-                target=result.target,
-                code=result.code,
-                checker_verdict=result.checker_verdict,
-                objective_verdict=result.objective_verdict,
-                parity_status=status,
-                parity_findings=findings,
-                rounds_used=result.rounds_used,
-                success=result.success,
-            )
-        except (FileNotFoundError, ValueError) as exc:
-            logger.warning("Parity check failed for %s: %s", target.address, exc)
-
-    if session:
-        session.record_result(result)
-
-    return result
+    return finalize_result(
+        result,
+        config,
+        backend,
+        session=session,
+        indexer=indexer,
+        output_dir=output_dir,
+    )
 
 
 def _target_to_hook(target: FunctionTarget) -> HookEntry:

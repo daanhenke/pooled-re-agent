@@ -40,9 +40,11 @@ re-agent reverse --class CTrain
 - Python 3.10+
 - [ghidra-ai-bridge](https://github.com/Dryxio/ghidra-ai-bridge) — re-agent uses this as its backend to decompile functions, fetch xrefs, read structs/enums, and query Ghidra. Install it and point it at your Ghidra project before running `re-agent reverse`.
 - One supported LLM setup:
-  - `ANTHROPIC_API_KEY` for Claude
-  - `OPENAI_API_KEY` for OpenAI-compatible APIs
+  - a local `claude` CLI login for the Claude Code provider (default; subscription-backed, no API key)
   - a local `codex` CLI login for the Codex provider
+  - `ANTHROPIC_API_KEY` for the Claude API provider
+  - `OPENAI_API_KEY` for OpenAI-compatible APIs
+- Optional, for pooling agents across machines: Docker (to run the bundled NATS server) — see [deploy/nats/README.md](deploy/nats/README.md)
 
 ## Installation
 
@@ -77,9 +79,9 @@ re-agent uses a layered configuration system (highest priority first): CLI flags
 
 ```yaml
 llm:
-  provider: claude           # claude | openai | openai-compat | codex
-  model: claude-sonnet-4-5-20250929
-  # api_key: set via RE_AGENT_LLM_API_KEY env var
+  provider: claude-code      # claude-code | codex | claude | openai | openai-compat
+  model: claude-opus-4-8
+  # api_key: set via RE_AGENT_LLM_API_KEY env var (API providers only)
   timeout_s: 1800
 
 backend:
@@ -113,12 +115,49 @@ See [docs/configuration.md](docs/configuration.md) for all options.
 | `re-agent parity --filter REGEX` | Run parity checks matching pattern |
 | `re-agent status` | Show reversal progress |
 | `re-agent status --class CLASS` | Show progress for a specific class |
+| `re-agent serve` | Run the orchestrator server for pooled agents (NATS) |
+| `re-agent agent` | Run a pooled worker connected to an orchestrator |
+| `re-agent init --role orchestrator\|agent` | Emit a role-specific config |
+
+Note: `--config` is a global flag and goes before the subcommand, e.g.
+`re-agent --config re-agent.yaml serve`.
 
 ## LLM Providers
 
+- **Claude Code CLI** (default) — uses your local `claude` CLI login (subscription/OAuth); no API key required
+- **Codex CLI** — uses local `codex exec` with ChatGPT login credentials; no API key required
 - **Claude** (Anthropic SDK) — set `ANTHROPIC_API_KEY`
 - **OpenAI / OpenAI-compatible** — set `OPENAI_API_KEY`, optionally set `base_url`
-- **Codex CLI** — uses local `codex exec` with ChatGPT login credentials; no API key required
+
+## Pooling agents across machines (NATS)
+
+re-agent can split into an **orchestrator** (holds Ghidra, the source tree, parity,
+and session state) and any number of **agents** (bring their own LLM login, need no
+Ghidra or source tree) so several people can pool their agents on one shared project.
+Both dial *outbound* to a NATS server, so **no port forwarding** is needed; agents
+proxy every RE tool call back to the orchestrator over NATS.
+
+```
+ agent (laptop)                 NATS server                 orchestrator (host)
+   own LLM login  ── outbound ──►  :4222  ◄── outbound ──   Ghidra + source tree
+```
+
+```bash
+# 0. Start the relay (any host both sides can reach)
+docker compose -f deploy/nats/docker-compose.yml up -d
+
+# 1. Orchestrator (project host)
+re-agent init --role orchestrator --config re-agent.orchestrator.yaml
+re-agent --config re-agent.orchestrator.yaml serve
+
+# 2. Agent (each volunteer — no Ghidra, no source tree)
+re-agent init --role agent --config re-agent.agent.yaml
+re-agent --config re-agent.agent.yaml agent --concurrency 2
+```
+
+Jobs are leased so two agents never get the same function, and an abandoned job is
+re-offered automatically. See [deploy/nats/README.md](deploy/nats/README.md) for auth
+(token / user-password / NKey creds) and TLS.
 
 ## Parity Engine
 

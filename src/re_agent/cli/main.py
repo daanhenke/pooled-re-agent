@@ -17,6 +17,12 @@ def build_parser() -> argparse.ArgumentParser:
     # init
     init_p = sub.add_parser("init", help="Initialize re-agent.yaml config file")
     init_p.add_argument("--profile", default=None, help="Use a built-in project profile template")
+    init_p.add_argument(
+        "--role",
+        choices=["orchestrator", "agent"],
+        default=None,
+        help="Emit a role-specific config (orchestrator server or pooled agent)",
+    )
 
     # reverse
     rev_p = sub.add_parser("reverse", help="Reverse engineer functions")
@@ -40,6 +46,16 @@ def build_parser() -> argparse.ArgumentParser:
     stat_p = sub.add_parser("status", help="Show reversal progress")
     stat_p.add_argument("--class", dest="class_name", help="Filter by class")
     stat_p.add_argument("--format", choices=["text", "json", "markdown"], default="text")
+
+    # serve (orchestrator)
+    serve_p = sub.add_parser("serve", help="Run the orchestrator server for pooled agents")
+    serve_p.add_argument("--project", default=None, help="Override transport.project (subject namespace)")
+
+    # agent (pooled worker)
+    agent_p = sub.add_parser("agent", help="Run a pooled worker connected to an orchestrator")
+    agent_p.add_argument("--project", default=None, help="Override transport.project (subject namespace)")
+    agent_p.add_argument("--agent-id", dest="agent_id", default=None, help="Override this agent's id")
+    agent_p.add_argument("--concurrency", type=int, default=None, help="Jobs to run in parallel")
 
     return parser
 
@@ -67,6 +83,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "status":
         from re_agent.cli.cmd_status import cmd_status
         return cmd_status(args)
+
+    if args.command == "serve":
+        from re_agent.cli.cmd_serve import cmd_serve
+        return cmd_serve(args)
+
+    if args.command == "agent":
+        from re_agent.cli.cmd_agent import cmd_agent
+        return cmd_agent(args)
 
     parser.print_help()
     return 1

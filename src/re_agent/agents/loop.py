@@ -7,6 +7,7 @@ from pathlib import Path
 
 from re_agent.agents.checker import CheckerAgent
 from re_agent.agents.reverser import ReverserAgent
+from re_agent.agents.source_context import SourceContextProvider
 from re_agent.backend.protocol import REBackend
 from re_agent.config.schema import ProjectProfile
 from re_agent.core.models import (
@@ -37,6 +38,7 @@ def run_fix_loop(
     objective_verifier_enabled: bool = True,
     objective_call_count_tolerance: int = 3,
     objective_control_flow_tolerance: int = 2,
+    source_context: SourceContextProvider | None = None,
 ) -> ReversalResult:
     """Run the reverser->checker->fix loop up to max_rounds.
 
@@ -62,6 +64,7 @@ def run_fix_loop(
         indexer=indexer,
         session=session,
         report_dir=report_dir,
+        source_context=source_context,
     )
     checker = CheckerAgent(checker_llm, backend)
 

@@ -10,3 +10,7 @@ build/
 .cache/
 *.egg
 .env
+.ghidra-exports/
+re-agent.yaml
+re-agent-progress.json
+ghidra-bridge.yaml

@@ -47,7 +47,15 @@ def create_provider(config: LLMConfig) -> LLMProvider:
             timeout_s=config.timeout_s,
         )
 
+    if config.provider in ("claude-code", "claude-cli"):
+        from re_agent.llm.claude_code import ClaudeCodeProvider
+
+        return ClaudeCodeProvider(
+            model=config.model or "claude-sonnet-4-5",
+            timeout_s=config.timeout_s,
+        )
+
     raise ValueError(
         f"Unknown LLM provider: {config.provider!r}. "
-        f"Supported providers: 'claude', 'openai', 'openai-compat', 'codex'."
+        f"Supported providers: 'claude', 'openai', 'openai-compat', 'codex', 'claude-code'."
     )

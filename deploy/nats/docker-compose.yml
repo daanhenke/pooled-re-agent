@@ -1,0 +1,19 @@
+# NATS relay for a re-agent pool.
+#
+# Only THIS host needs a reachable port (4222).  The orchestrator and every
+# agent dial OUTBOUND to it, so none of them need port forwarding.  Run it
+# anywhere both sides can reach (a small VPS, a home server with one forwarded
+# port, etc.):
+#
+#   docker compose -f deploy/nats/docker-compose.yml up -d
+services:
+  nats:
+    image: nats:2.10
+    container_name: re-agent-nats
+    command: ["-c", "/etc/nats/nats-server.conf"]
+    ports:
+      - "4222:4222"   # client connections (orchestrator + agents)
+      - "8222:8222"   # monitoring dashboard (optional, http://host:8222)
+    volumes:
+      - ./nats-server.conf:/etc/nats/nats-server.conf:ro
+    restart: unless-stopped
