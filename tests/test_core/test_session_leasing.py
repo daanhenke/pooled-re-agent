@@ -68,3 +68,28 @@ def test_picker_skips_leased(tmp_path: Path) -> None:
 
     session.mark_in_progress(second, "agentB", lease_s=60)
     assert pick_next_global(backend, session) is None  # nothing left
+
+
+def test_enqueue_dedupe_and_order(tmp_path: Path) -> None:
+    session = Session(tmp_path / "s.json")
+    n = session.enqueue_targets([_target("0x5000"), _target("0x5004"), _target("0x5000")])
+    assert n == 2  # duplicate 0x5000 skipped
+    assert [t.address for t in session.queued_targets()] == ["0x5000", "0x5004"]
+    assert session.enqueue_targets([_target("0x5000")]) == 0  # already queued
+    assert session.queue_size() == 2
+
+
+def test_enqueue_skips_and_prunes_attempted(tmp_path: Path) -> None:
+    session = Session(tmp_path / "s.json")
+    session.enqueue_targets([_target("0x6000"), _target("0x6004")])
+    session.record_result(
+        ReversalResult(
+            target=_target("0x6000"),
+            code="void f(){}",
+            checker_verdict=CheckerVerdict(Verdict.PASS, "ok"),
+            success=True,
+        )
+    )
+    assert session.queue_size() == 1  # completed 0x6000 pruned
+    assert [t.address for t in session.queued_targets()] == ["0x6004"]
+    assert session.enqueue_targets([_target("0x6000")]) == 0  # already attempted

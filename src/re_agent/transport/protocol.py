@@ -39,6 +39,10 @@ def job_submit_subject(project: str) -> str:
     return f"{_PREFIX}.{project}.job.submit"
 
 
+def enqueue_subject(project: str) -> str:
+    return f"{_PREFIX}.{project}.enqueue"
+
+
 def events_subject(project: str) -> str:
     return f"{_PREFIX}.{project}.events"
 

@@ -22,7 +22,7 @@ class Session:
 
     def __init__(self, path: str | Path = "re-agent-progress.json") -> None:
         self.path = Path(path)
-        self._data: dict[str, Any] = {"functions": {}, "runs": [], "in_progress": {}}
+        self._data: dict[str, Any] = {"functions": {}, "runs": [], "in_progress": {}, "queue": []}
         if self.path.exists():
             self.load()
 
@@ -30,11 +30,12 @@ class Session:
         try:
             self._data = json.loads(self.path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
-            self._data = {"functions": {}, "runs": [], "in_progress": {}}
-        # Tolerate older files that predate leasing.
+            self._data = {"functions": {}, "runs": [], "in_progress": {}, "queue": []}
+        # Tolerate older files that predate leasing/queueing.
         self._data.setdefault("functions", {})
         self._data.setdefault("runs", [])
         self._data.setdefault("in_progress", {})
+        self._data.setdefault("queue", [])
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -105,6 +106,61 @@ class Session:
     def is_in_progress(self, address: str) -> bool:
         """Return True if this address currently holds a live lease."""
         return normalize_address(address) in self.active_in_progress()
+
+    # -- explicit work queue (re-agent enqueue) -------------------------------
+
+    def enqueue_targets(self, targets: list[FunctionTarget]) -> int:
+        """Append targets to the priority queue; skip dupes and done functions.
+
+        The queue is a persistent *priority list*: assignment drains it before
+        the greedy picker.  Entries are not removed on assignment — leasing and
+        the attempted-filter exclude them, and completed entries are pruned, so
+        an abandoned (lease-expired) job reappears at the front automatically.
+
+        Returns the number of newly-queued targets.
+        """
+        self._prune_queue()
+        existing = {normalize_address(e["address"]) for e in self._data["queue"]}
+        added = 0
+        for t in targets:
+            addr = normalize_address(t.address)
+            if addr in existing or self.is_attempted(t.address):
+                continue
+            self._data["queue"].append({
+                "address": t.address,
+                "class_name": t.class_name,
+                "function_name": t.function_name,
+                "caller_count": t.caller_count,
+            })
+            existing.add(addr)
+            added += 1
+        if added:
+            self.save()
+        return added
+
+    def queued_targets(self) -> list[FunctionTarget]:
+        """Return the queued targets in priority (FIFO) order, pruning done ones."""
+        self._prune_queue()
+        return [
+            FunctionTarget(
+                address=e["address"],
+                class_name=e.get("class_name", ""),
+                function_name=e.get("function_name", ""),
+                caller_count=e.get("caller_count", 0),
+            )
+            for e in self._data["queue"]
+        ]
+
+    def queue_size(self) -> int:
+        self._prune_queue()
+        return len(self._data["queue"])
+
+    def _prune_queue(self) -> None:
+        """Drop queue entries that have since been attempted (completed/failed)."""
+        kept = [e for e in self._data["queue"] if not self.is_attempted(e["address"])]
+        if len(kept) != len(self._data["queue"]):
+            self._data["queue"] = kept
+            self.save()
 
     def is_completed(self, address: str) -> bool:
         addr = normalize_address(address)

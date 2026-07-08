@@ -139,3 +139,30 @@ async def test_job_error_releases_lease(tmp_path: Path) -> None:
     reply2 = await bus.request(proto.job_request_subject(project), {"agent_id": "t2"}, 30)
     assert reply2["target"] is not None
     assert wire.decode_target(reply2["target"]).address == "0x700000"
+
+
+@pytest.mark.asyncio
+async def test_enqueue_takes_priority_over_greedy(tmp_path: Path) -> None:
+    config = _make_config(tmp_path)
+    session = Session(config.output.session_file)
+    backend = StubBackend(remaining_functions=[
+        FunctionEntry(address="0x900000", name="Greedy", class_name="CStub", caller_count=1),
+    ])
+    service = OrchestratorService(config, backend, session, indexer=None, source_ctx=None)
+    bus = FakeTransport()
+    await service.subscribe(bus)
+    project = "testproj"
+
+    enq = await bus.request(
+        proto.enqueue_subject(project),
+        {"addresses": ["0x111111", "0x222222"], "filter": None},
+        30,
+    )
+    assert enq["ok"] and enq["enqueued"] == 2
+
+    # Queued addresses are handed out first (in order), then the greedy pick.
+    handed = []
+    for aid in ("a1", "a2", "a3", "a4"):
+        r = await bus.request(proto.job_request_subject(project), {"agent_id": aid}, 30)
+        handed.append(wire.decode_target(r["target"]).address if r["target"] else None)
+    assert handed == ["0x111111", "0x222222", "0x900000", None]

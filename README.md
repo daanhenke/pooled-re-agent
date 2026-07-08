@@ -117,6 +117,8 @@ See [docs/configuration.md](docs/configuration.md) for all options.
 | `re-agent status --class CLASS` | Show progress for a specific class |
 | `re-agent serve` | Run the orchestrator server for pooled agents (NATS) |
 | `re-agent agent` | Run a pooled worker connected to an orchestrator |
+| `re-agent enqueue --address ADDR` | Enqueue specific functions for the pool (priority over auto-pick) |
+| `re-agent enqueue --filter PATTERN` | Enqueue all unimplemented functions matching a pattern |
 | `re-agent init --role orchestrator\|agent` | Emit a role-specific config |
 
 Note: `--config` is a global flag and goes before the subcommand, e.g.
@@ -158,6 +160,24 @@ re-agent --config re-agent.agent.yaml agent --concurrency 2
 Jobs are leased so two agents never get the same function, and an abandoned job is
 re-offered automatically. See [deploy/nats/README.md](deploy/nats/README.md) for auth
 (token / user-password / NKey creds) and TLS.
+
+### Choosing what gets reversed
+
+By default the orchestrator hands out the most-called unimplemented function each
+time an agent asks. To steer it:
+
+- **Scope** — set `orchestrator.classes: [...]` in the config to restrict auto-pick
+  to matching functions (a name filter passed to the backend).
+- **Enqueue** (explicit, live) — push specific work to a *running* orchestrator; the
+  queue is drained before the greedy picker:
+
+  ```bash
+  re-agent --config re-agent.yaml enqueue --address 0x1400011bc --address 0x140001000
+  re-agent --config re-agent.yaml enqueue --filter FUN_14026     # all matching unimplemented
+  re-agent --config re-agent.yaml enqueue --file targets.txt     # one address per line
+  ```
+
+  The queue is persisted in the session, deduped, and pruned as functions complete.
 
 ## Parity Engine
 

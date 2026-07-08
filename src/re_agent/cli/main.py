@@ -57,6 +57,13 @@ def build_parser() -> argparse.ArgumentParser:
     agent_p.add_argument("--agent-id", dest="agent_id", default=None, help="Override this agent's id")
     agent_p.add_argument("--concurrency", type=int, default=None, help="Jobs to run in parallel")
 
+    # enqueue (push work to a running orchestrator)
+    enq_p = sub.add_parser("enqueue", help="Enqueue functions for the pool to reverse (priority over auto-pick)")
+    enq_p.add_argument("--address", action="append", help="Address to enqueue (repeatable)")
+    enq_p.add_argument("--filter", help="Enqueue all unimplemented functions matching this pattern")
+    enq_p.add_argument("--file", help="File with one address per line")
+    enq_p.add_argument("--project", default=None, help="Override transport.project (subject namespace)")
+
     return parser
 
 
@@ -91,6 +98,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "agent":
         from re_agent.cli.cmd_agent import cmd_agent
         return cmd_agent(args)
+
+    if args.command == "enqueue":
+        from re_agent.cli.cmd_enqueue import cmd_enqueue
+        return cmd_enqueue(args)
 
     parser.print_help()
     return 1
